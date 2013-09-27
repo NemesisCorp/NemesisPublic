@@ -1,0 +1,189 @@
+#include "FreeRTOS.h"
+#include "task.h"
+#include "queue.h"
+#include "lcd.h"
+#include "stdio.h"
+
+static void LED1_Task(void *pvParameters); 						// prototype for led task
+static void LED2_Task(void *pvParameters);
+static void BUTTON1_Task(void *pvParameters); 					// prototype for button task
+static void BUTTON2_Task(void *pvParameters);
+static void LCD_Task(void *pvParameters);
+static void TIME_Task(void *pvParameters);
+
+static xQueueHandle xQueue = NULL; 								// prototype for queue
+
+#define LED1_TASK_PRIORITY (tskIDLE_PRIORITY + 1) 				// assign priority to led task
+#define BUTTON1_TASK_PRIORITY (tskIDLE_PRIORITY + 2) 			// assign priority to button task
+#define LED2_TASK_PRIORITY (tskIDLE_PRIORITY + 1)
+#define BUTTON2_TASK_PRIORITY (tskIDLE_PRIORITY + 2)
+#define TIME_TASK_PRIORITY (tskIDLE_PRIORITY + 1)
+#define LCD_TASK_PRIORITY (tskIDLE_PRIORITY + 2)
+
+#define mainQUEUE_LENGTH 5
+
+const unsigned char MSG0[10] = "STOP CLOCK";
+const unsigned char DIVIDER[25] = "-------------------------";
+const unsigned char MSG1[7] = "LED ON:";
+const unsigned char TIME[13] = "HR:MIN:SEC:MS";
+const unsigned char array[25];
+
+volatile unsigned int millisec = 0;
+volatile unsigned int sec = 0;
+volatile unsigned int min = 0;
+volatile unsigned int hr = 0;
+
+static void BUTTON1_Task(void *pvParameters)					//Start/Stop
+{
+	uint32_t data = 5; 											// random data
+	portTickType xNextWakeTime; 								//necessary for vtaskdelayuntil
+	xNextWakeTime = xTaskGetTickCount(); 						//necessary for vtaskdelayuntil
+	while(1)
+	{
+		if(!(((LPC_GPIO0 -> FIOPIN)&(1<<2))>>2)) 				// IF button 2 pressed
+		{
+			xQueueSend(xQueue, &data, 0); 						// Send Data to LED task
+			vTaskDelay(250); 									// Debounce delay ~250ms
+		}
+		vTaskDelayUntil(&xNextWakeTime, 10); 					//Delay for 10ms
+	}
+}
+
+static void BUTTON2_Task(void *pvParameters)					//Reset
+{
+	uint32_t data = 5;
+	portTickType xNextWakeTime;
+	xNextWakeTime = xTaskGetTickCount();
+	while(1)
+	{
+		if(!(((LPC_GPIO0 -> FIOPIN)&(1<<3))>>3))
+		{
+			xQueueSend(xQueue, &data, 0);
+			vTaskDelay(250);
+		}
+		vTaskDelayUntil(&xNextWakeTime, 10);
+	}
+}
+/*
+static void LED1_Task(void *pvParameters)
+{
+	uint32_t data = 0;
+	uint8_t LED_Sequence_ON = 1;
+	LPC_GPIO1 -> FIODIR |= (1<<19);
+	while(1)
+	{
+		if(xQueueReceive(xQueue, &data, 0)) 				// If new data in queue, do something
+		{
+			LED_Sequence_ON = !LED_Sequence_ON; 			// Toggle Sequence on/off
+		}
+		if(LED_Sequence_ON)
+		{
+			LPC_GPIO1 -> FIOPIN ^= (1<<19);					//toggle LED on/off
+		}
+		else
+		{
+			LPC_GPIO1 -> FIOSET = (1<<19); 					// LED off;
+		}
+		vTaskDelay(500); 									//Delay for ~500ms
+	}
+}
+
+static void LED2_Task(void *pvParameters)
+{
+	uint32_t data = 0;
+	uint8_t LED_Sequence_ON = 1;
+	LPC_GPIO1 -> FIODIR |= (1<<20);
+	while(1)
+	{
+		if(xQueueReceive(xQueue, &data, 0))
+			LED_Sequence_ON = !LED_Sequence_ON;
+		if(LED_Sequence_ON)
+			LPC_GPIO1 -> FIOPIN ^= (1<<20);
+		else
+			LPC_GPIO1 -> FIOSET = (1<20);
+		vTaskDelay(1000);									//Delay ~1 sec
+	}
+}
+*/
+static void TIME_Task(void *pvParameters)					//static function keeps track of time
+{
+	portTickType xNextWakeTime;
+	xNextWakeTime = xTaskGetTickCount();
+
+	while(1)
+	{
+		vTaskDelayUntil(&xNextWakeTime, 10);
+		millisec++;
+		xQueueSend(xQueue, (unsigned int *) &millisec, 0);
+
+		if(millisec == 100)
+		{
+			sec++;
+			xQueueSend(xQueue, (unsigned int *) &sec, 0);
+			millisec = 0;
+		}
+		if(sec == 60)
+		{
+			min++;
+			xQueueSend(xQueue, (unsigned int *) &min, 0);
+			sec = 0;
+		}
+		if(min == 60)
+		{
+			hr++;
+			xQueueSend(xQueue, (unsigned int *) &hr, 0);
+			min = 0;
+		}
+		if(hr == 24)
+		{
+			hr = 0;
+			xQueueSend(xQueue, (unsigned int *) &hr, 0);
+		}
+		//sprintf((unsigned char*) array, "%u:%u:%u:%u", (unsigned int*) hr, (unsigned int*) min, (unsigned int*) sec, (unsigned int*) millisec);
+		//drawString(10,80,(unsigned char*) array);
+	}
+}
+
+static void LCD_Task(void *pvParameters)
+{
+	while(1)
+	{
+		vTaskDelay(50);
+		if((xQueueReceive(xQueue, (unsigned int *) &hr, 60000000))|(xQueueReceive(xQueue, (unsigned int *) &min, 60000))|(xQueueReceive(xQueue, (unsigned int *) &sec, 6000))|(xQueueReceive(xQueue, (unsigned int *) &millisec, 0)))
+		{
+			sprintf((unsigned char*) array, "%u:%u:%u:%u", (unsigned int*) hr, (unsigned int*) min, (unsigned int*) sec, (unsigned int*) millisec);
+			drawString(10,80,(unsigned char*) array);
+		}
+	}
+}
+
+int main(void)
+{
+	lcd_init();
+	fillScreen(0xFFFF); 									//fillscreen with white color
+	setBackgroundColor16(0xFFFF); 							//set background with white color
+
+	setColor16(ST7735_16_GREEN);
+	drawString(10,10,(char*)DIVIDER);
+
+	setColor16(ST7735_16_ORANGE);
+	drawString(50,20,(char*)MSG0);							//x,y,char *string
+
+	setColor16(ST7735_16_GREEN);
+	drawString(10,30,(char*)DIVIDER);
+
+	setColor16(ST7735_16_RED);
+	drawString(10,50, (char*)MSG1);
+
+	drawString(10,70, (char*)TIME);
+
+	xQueue = xQueueCreate(mainQUEUE_LENGTH, sizeof(unsigned int)); // create queue
+	//xTaskCreate(LED1_Task, (signed char *) "LED1", configMINIMAL_STACK_SIZE, NULL, TIME_TASK_PRIORITY, NULL);
+	xTaskCreate(BUTTON1_Task, (signed char *) "BUTTON1", configMINIMAL_STACK_SIZE, NULL, TIME_TASK_PRIORITY, NULL);
+	//xTaskCreate(LED2_Task, (signed char *) "LED2", configMINIMAL_STACK_SIZE, NULL, TIME_TASK_PRIORITY, NULL);
+	xTaskCreate(BUTTON2_Task, (signed char *) "BUTTON2", configMINIMAL_STACK_SIZE, NULL, TIME_TASK_PRIORITY, NULL);
+	xTaskCreate(TIME_Task, (signed char *) "TIME_Task", configMINIMAL_STACK_SIZE, NULL, TIME_TASK_PRIORITY, NULL);
+	//xTaskCreate(LCD_Task, (signed char *) "LCD_Task", configMINIMAL_STACK_SIZE, NULL, TIME_TASK_PRIORITY, NULL);
+	vTaskStartScheduler(); 									// Starts task system
+	while(1); // Should never reach this point, unless there is not enough FreeRTOS heap memory available for idle task to be created
+}

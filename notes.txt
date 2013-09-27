@@ -1,0 +1,14 @@
+Notes by nate: 
+
+alias: ActionScript
+
+Lab3: Nate is b0$$, nice lab, it works. 
+You need to have your problems and warning windows open at all time! 13 warnings! gahhh!!!!
+For example
+You have: 
+const unsigned char DIVIDER[25] = "-------------------------";
+and
+drawString(10,10,DIVIDER);
+
+Look at the type of what your suppose to be passing into a function. drawString accepts a pointer for char, you attempted to pass in unsigned char. Cast or follow the type def of the function you are using. 
+drawString(10,10,(char *)DIVIDER); is proper and will yield no errors or warnings. Don't rely on the compiler to save you. 
